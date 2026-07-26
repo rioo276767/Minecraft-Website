@@ -11,20 +11,22 @@ export default async function handler(req, res) {
       {
         headers: {
           'Authorization': `Bearer ${API_KEY}`,
-          'Content-Type': 'application/json',
           'Accept': 'application/json'
         }
       }
     );
-    // Pterodactyl ga punya endpoint langsung buat log, kita pake websocket token
-    // Tapi buat simpel, kita return token + cara akses
+    
+    const data = response.data.data;
     res.status(200).json({
       status: 'success',
-      message: 'Gunakan WebSocket untuk log realtime',
-      token: response.data.data.token,
-      socket: response.data.data.socket
+      token: data.token,
+      socket: data.socket
     });
   } catch (error) {
-    res.status(500).json({ status: 'error', message: error.message });
+    console.error('WebSocket error:', error.message);
+    res.status(500).json({ 
+      status: 'error', 
+      message: error.message 
+    });
   }
 }

@@ -1,17 +1,17 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function Home() {
   const [uptime, setUptime] = useState('---');
   const [status, setStatus] = useState('---');
   const [logs, setLogs] = useState(['🔄 Console ready... by_rioo👿']);
   const [command, setCommand] = useState('');
-  const [wsConnected, setWsConnected] = useState(false);
-  const wsRef = useRef(null);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const addLog = (msg) => {
     setLogs(prev => {
       const newLogs = [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`];
-      return newLogs.slice(-100); // Keep last 100 logs
+      return newLogs.slice(-200);
     });
   };
 
@@ -28,127 +28,116 @@ export default function Home() {
     try {
       const res = await fetch('/api/server/status');
       const data = await res.json();
+      
       if (data.status === 'success') {
-        setStatus(data.data.state);
+        setStatus(data.data.state || 'unknown');
         setUptime(formatUptime(data.data.uptime));
+        setErrorMsg('');
+      } else {
+        setErrorMsg(data.message || 'Gagal ambil status');
       }
     } catch (e) {
-      addLog('⚠️ Gagal ambil status: ' + e.message);
+      setErrorMsg('Gagal konek ke API: ' + e.message);
     }
   };
 
   const sendCommand = async () => {
-    if (!command.trim()) return addLog('⚠️ Perintah kosong');
+    if (!command.trim()) {
+      addLog('⚠️ Perintah kosong');
+      return;
+    }
+    
+    setLoading(true);
     try {
       const res = await fetch('/api/server/console', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command })
+        body: JSON.stringify({ command: command.trim() })
       });
+      
       const data = await res.json();
-      addLog(data.status === 'success' ? data.message : '❌ ' + data.message);
+      
+      if (data.status === 'success') {
+        addLog('✅ ' + data.message);
+      } else {
+        addLog('❌ ' + (data.message || 'Gagal kirim command'));
+      }
       setCommand('');
     } catch (e) {
       addLog('⚠️ Error: ' + e.message);
     }
+    setLoading(false);
   };
 
-  // WebSocket untuk console log realtime
   useEffect(() => {
-    const connectWebSocket = async () => {
-      try {
-        const res = await fetch('/api/server/logs');
-        const data = await res.json();
-        if (data.status === 'success' && data.token) {
-          const wsUrl = data.socket.replace('http', 'ws') + `?token=${data.token}`;
-          const ws = new WebSocket(wsUrl);
-          wsRef.current = ws;
-
-          ws.onopen = () => {
-            setWsConnected(true);
-            addLog('✅ WebSocket connected - console log live!');
-          };
-
-          ws.onmessage = (event) => {
-            const msg = event.data;
-            addLog('📡 ' + msg);
-          };
-
-          ws.onerror = (error) => {
-            addLog('⚠️ WebSocket error: ' + error.message);
-          };
-
-          ws.onclose = () => {
-            setWsConnected(false);
-            addLog('🔌 WebSocket disconnected');
-            setTimeout(connectWebSocket, 5000);
-          };
-        }
-      } catch (e) {
-        addLog('⚠️ Gagal connect WebSocket: ' + e.message);
-        setTimeout(connectWebSocket, 5000);
-      }
-    };
-
-    connectWebSocket();
     fetchStatus();
-    const interval = setInterval(fetchStatus, 10000);
-
-    return () => {
-      if (wsRef.current) wsRef.current.close();
-      clearInterval(interval);
-    };
+    const interval = setInterval(fetchStatus, 15000);
+    return () => clearInterval(interval);
   }, []);
+
+  // Handle Enter key
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      sendCommand();
+    }
+  };
 
   return (
     <div style={styles.container}>
       <div style={styles.card}>
         <h1 style={styles.title}>⚡ NEXO CONSOLE ⚡</h1>
         
-        {/* Status & Uptime */}
+        {errorMsg && (
+          <div style={styles.errorBox}>
+            ⚠️ {errorMsg}
+          </div>
+        )}
+        
         <div style={styles.statusBox}>
           <div style={styles.statusItem}>
             <span style={styles.label}>📌 Status</span>
-            <span style={{...styles.value, color: status === 'running' ? '#00ff88' : '#ff4466'}}>
-              {status.toUpperCase()}
+            <span style={{
+              ...styles.value, 
+              color: status === 'running' ? '#00ff88' : '#ff4466'
+            }}>
+              {status.toUpperCase() || '---'}
             </span>
           </div>
           <div style={styles.statusItem}>
             <span style={styles.label}>⏱️ Uptime</span>
             <span style={styles.value}>{uptime}</span>
           </div>
-          <div style={styles.statusItem}>
-            <span style={styles.label}>🔗 WebSocket</span>
-            <span style={{...styles.value, color: wsConnected ? '#00ff88' : '#ff4466'}}>
-              {wsConnected ? '🟢 Connected' : '🔴 Disconnected'}
-            </span>
-          </div>
         </div>
 
-        {/* Console Log */}
         <div style={styles.logContainer}>
           <div style={styles.logHeader}>
             <span>📜 Console Log</span>
-            <button style={styles.clearBtn} onClick={() => setLogs([])}>Clear</button>
+            <button style={styles.clearBtn} onClick={() => setLogs(['🔄 Log cleared...'])}>
+              Clear
+            </button>
           </div>
-          <div style={styles.logBox}>
+          <div style={styles.logBox} id="logBox">
             {logs.map((log, i) => (
               <div key={i} style={styles.logLine}>{log}</div>
             ))}
           </div>
         </div>
 
-        {/* Command Input */}
         <div style={styles.inputArea}>
           <input
             style={styles.input}
             value={command}
             onChange={(e) => setCommand(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && sendCommand()}
+            onKeyPress={handleKeyPress}
             placeholder="Ketik command (contoh: /list, /say halo)"
+            disabled={loading}
           />
-          <button style={styles.sendBtn} onClick={sendCommand}>
-            📤 Kirim
+          <button 
+            style={{...styles.sendBtn, opacity: loading ? 0.5 : 1}} 
+            onClick={sendCommand}
+            disabled={loading}
+          >
+            {loading ? '⏳' : '📤 Kirim'}
           </button>
         </div>
 
@@ -166,7 +155,8 @@ const styles = {
     justifyContent: 'center',
     alignItems: 'center',
     fontFamily: "'Courier New', monospace",
-    padding: '20px'
+    padding: '20px',
+    margin: 0
   },
   card: {
     background: '#1a1a1a',
@@ -184,6 +174,16 @@ const styles = {
     textShadow: '0 0 20px #00ffcc',
     marginBottom: '20px'
   },
+  errorBox: {
+    background: '#ff446622',
+    border: '1px solid #ff4466',
+    color: '#ff4466',
+    padding: '10px',
+    borderRadius: '10px',
+    marginBottom: '15px',
+    textAlign: 'center',
+    fontSize: '14px'
+  },
   statusBox: {
     background: '#111',
     padding: '15px',
@@ -200,9 +200,7 @@ const styles = {
   },
   label: { color: '#888' },
   value: { color: '#00ffcc', fontWeight: 'bold' },
-  logContainer: {
-    marginBottom: '15px'
-  },
+  logContainer: { marginBottom: '15px' },
   logHeader: {
     display: 'flex',
     justifyContent: 'space-between',
